@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 The CyanogenMod Project
+ * Copyright (C) 2020-2021 The LineageOS Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,19 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lineageos.settings.doze;
 
-import android.os.Bundle;
-import android.preference.PreferenceActivity;
+#ifndef SAMSUNG_FASTCHARGE_H
+#define SAMSUNG_FASTCHARGE_H
 
-public class SamsungDozeActivity extends PreferenceActivity {
+#define FASTCHARGE_DEFAULT_SETTING true
+#define FASTCHARGE_PATH "/sys/class/sec/switch/afc_disable"
 
-    private static final String TAG = "samsung_doze";
-
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
-        getFragmentManager().beginTransaction().replace(android.R.id.content,
-                new SamsungDozeSettings(), TAG).commit();
-    }
-}
+#endif // SAMSUNG_FASTCHARGE_H
