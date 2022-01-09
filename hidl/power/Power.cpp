@@ -63,38 +63,12 @@ Return<void> Power::setInteractive(bool interactive) {
         }
     }
 
-    if (!sec_touchscreen.empty()) {
-        set(sec_touchscreen, interactive ? "1" : "0");
-    }
-
-    if (!sec_touchkey.empty()) {
-        if (!interactive) {
-            int button_state = get(sec_touchkey, -1);
-
-            if (button_state < 0) {
-                LOG(ERROR) << "Failed to read touchkey state";
-                goto out;
-            }
-
-            /*
-             * If button_state is 0, the keys have been disabled by another component
-             * (for example lineagehw), which means we don't want them to be enabled when resuming
-             * from suspend.
-             */
-            if (button_state == 0) {
-                touchkeys_blocked = true;
-            }
-        }
-
-        if (!touchkeys_blocked) {
-            set(sec_touchkey, interactive ? "1" : "0");
-        }
-    }
-
 out:
     for (const std::string& interactivePath : cpuInteractivePaths) {
         set(interactivePath + "/io_is_busy", interactive ? "1" : "0");
     }
+
+    set("/sys/power/cpuhotplug/max_online_cpu", interactive ? "8" : "6");
 
     return Void();
 }
@@ -102,13 +76,6 @@ out:
 Return<void> Power::powerHint(PowerHint hint, int32_t data) {
     if (!initialized) {
         initialize();
-    }
-
-    /* Bail out if low-power mode is active */
-    if (current_profile == PowerProfile::POWER_SAVE && hint != PowerHint::LOW_POWER &&
-        hint != static_cast<PowerHint>(LineagePowerHint::SET_PROFILE)) {
-        LOG(VERBOSE) << "PROFILE_POWER_SAVE active, ignoring hint " << static_cast<int32_t>(hint);
-        return Void();
     }
 
     switch (hint) {
@@ -120,28 +87,28 @@ Return<void> Power::powerHint(PowerHint hint, int32_t data) {
             setProfile(data ? PowerProfile::POWER_SAVE : PowerProfile::BALANCED);
             break;
         default:
-            if (hint == static_cast<PowerHint>(LineagePowerHint::SET_PROFILE)) {
-                setProfile(static_cast<PowerProfile>(data));
-            } else if (hint == static_cast<PowerHint>(LineagePowerHint::CPU_BOOST)) {
-                sendBoost(data);
-            } else {
-                LOG(INFO) << "Unknown power hint: " << static_cast<int32_t>(hint);
-            }
             break;
     }
     return Void();
 }
 
-Return<void> Power::setFeature(Feature feature __unused, bool activate __unused) {
+Return<void> Power::setFeature(Feature feature, bool activate) {
     if (!initialized) {
         initialize();
     }
 
-#ifdef TAP_TO_WAKE_NODE
     if (feature == Feature::POWER_FEATURE_DOUBLE_TAP_TO_WAKE) {
-        set(TAP_TO_WAKE_NODE, activate ? "1" : "0");
+        if (activate) {
+            std::string screen_size = get<std::string>("/sys/class/graphics/fb0/virtual_size", "");
+            if (!screen_size.empty()) {
+                set("/sys/class/sec/tsp/cmd", "aod_enable,1");
+                set("/sys/class/sec/tsp/cmd", "set_aod_rect," + screen_size + ",0,0");
+            }
+        } else {
+            set("/sys/class/sec/tsp/cmd", "aod_enable,0");
+            set("/sys/class/sec/tsp/cmd", "set_aod_rect,0,0,0,0");
+        }
     }
-#endif
 
     return Void();
 }
@@ -151,19 +118,10 @@ Return<void> Power::getPlatformLowPowerStats(getPlatformLowPowerStats_cb _hidl_c
     return Void();
 }
 
-Return<int32_t> Power::getFeature(LineageFeature feature) {
-    switch (feature) {
-        case LineageFeature::SUPPORTED_PROFILES:
-            return static_cast<int32_t>(PowerProfile::MAX);
-        default:
-            return -1;
-    }
-}
-
 void Power::initialize() {
     findInputNodes();
 
-    current_profile = PowerProfile::BALANCED;
+    setProfile(PowerProfile::BALANCED);
 
     for (const std::string& interactivePath : cpuInteractivePaths) {
         hispeed_freqs.emplace_back(get<std::string>(interactivePath + "/hispeed_freq", ""));
@@ -172,6 +130,15 @@ void Power::initialize() {
     for (const std::string& sysfsPath : cpuSysfsPaths) {
         max_freqs.emplace_back(get<std::string>(sysfsPath + "/cpufreq/scaling_max_freq", ""));
     }
+
+    set(cpuInteractivePaths.at(0) + "/timer_rate", "20000");
+    set(cpuInteractivePaths.at(0) + "/timer_slack", "20000");
+    set(cpuInteractivePaths.at(0) + "/min_sample_time", "40000");
+    set(cpuInteractivePaths.at(0) + "/boostpulse_duration", "40000");
+    set(cpuInteractivePaths.at(1) + "/timer_rate", "20000");
+    set(cpuInteractivePaths.at(1) + "/timer_slack", "20000");
+    set(cpuInteractivePaths.at(1) + "/min_sample_time", "40000");
+    set(cpuInteractivePaths.at(1) + "/boostpulse_duration", "40000");
 
     initialized = true;
 }
@@ -183,19 +150,6 @@ void Power::findInputNodes() {
         if (ec || de.path().string().find("/sys/class/input/input") == std::string::npos) {
             continue;
         }
-
-        for (auto& de2 : std::filesystem::directory_iterator(de.path(), ec)) {
-            if (!ec && de2.path().string().find("/name") != std::string::npos) {
-                std::string content = get<std::string>(de2.path(), "");
-                if (content == "sec_touchkey") {
-                    sec_touchkey = de.path().string().append("/enabled");
-                    LOG(INFO) << "found sec_touchkey: " << sec_touchkey;
-                } else if (content == "sec_touchscreen") {
-                    sec_touchscreen = de.path().string().append("/enabled");
-                    LOG(INFO) << "found sec_touchscreen: " << sec_touchscreen;
-                }
-            }
-        }
     }
 }
 
@@ -206,25 +160,40 @@ void Power::setProfile(PowerProfile profile) {
 
     switch (profile) {
         case PowerProfile::POWER_SAVE:
-            // Limit to hispeed freq
-            for (int i = 0; i < cpuSysfsPaths.size(); i++) {
-                if (hispeed_freqs.size() > i && !hispeed_freqs.at(i).empty()) {
-                    set(cpuSysfsPaths.at(i) + "/cpufreq/scaling_max_freq", hispeed_freqs.at(i));
-                }
-            }
+                set(cpuInteractivePaths.at(0) + "/hispeed_freq", INTERACTIVE_LOW_L_HISPEED_FREQ);
+                set(cpuInteractivePaths.at(0) + "/go_hispeed_load", INTERACTIVE_LOW_L_GO_HISPEED_LOAD);
+                set(cpuInteractivePaths.at(0) + "/target_loads", INTERACTIVE_LOW_L_TARGET_LOADS);
+                set(cpuInteractivePaths.at(0) + "/above_hispeed_delay", INTERACTIVE_LOW_L_ABOVE_HISPEED_DELAY);
+                set(cpuInteractivePaths.at(1) + "/hispeed_freq", INTERACTIVE_LOW_B_HISPEED_FREQ);
+                set(cpuInteractivePaths.at(1) + "/go_hispeed_load", INTERACTIVE_LOW_B_GO_HISPEED_LOAD);
+                set(cpuInteractivePaths.at(1) + "/target_loads", INTERACTIVE_LOW_B_TARGET_LOADS);
+                set(cpuInteractivePaths.at(1) + "/above_hispeed_delay", INTERACTIVE_LOW_B_ABOVE_HISPEED_DELAY);
             break;
         case PowerProfile::BALANCED:
+                set(cpuInteractivePaths.at(0) + "/hispeed_freq", INTERACTIVE_NORMAL_L_HISPEED_FREQ);
+                set(cpuInteractivePaths.at(0) + "/go_hispeed_load", INTERACTIVE_NORMAL_L_GO_HISPEED_LOAD);
+                set(cpuInteractivePaths.at(0) + "/target_loads", INTERACTIVE_NORMAL_L_TARGET_LOADS);
+                set(cpuInteractivePaths.at(0) + "/above_hispeed_delay", INTERACTIVE_NORMAL_L_ABOVE_HISPEED_DELAY);
+                set(cpuInteractivePaths.at(1) + "/hispeed_freq", INTERACTIVE_NORMAL_B_HISPEED_FREQ);
+                set(cpuInteractivePaths.at(1) + "/go_hispeed_load", INTERACTIVE_NORMAL_B_GO_HISPEED_LOAD);
+                set(cpuInteractivePaths.at(1) + "/target_loads", INTERACTIVE_NORMAL_B_TARGET_LOADS);
+                set(cpuInteractivePaths.at(1) + "/above_hispeed_delay", INTERACTIVE_NORMAL_B_ABOVE_HISPEED_DELAY);
+                break;
         case PowerProfile::HIGH_PERFORMANCE:
-            // Restore normal max freq
-            for (int i = 0; i < cpuSysfsPaths.size(); i++) {
-                if (max_freqs.size() > i && !max_freqs.at(i).empty()) {
-                    set(cpuSysfsPaths.at(i) + "/cpufreq/scaling_max_freq", max_freqs.at(i));
-                }
-            }
+                set(cpuInteractivePaths.at(0) + "/hispeed_freq", INTERACTIVE_HIGH_L_HISPEED_FREQ);
+                set(cpuInteractivePaths.at(0) + "/go_hispeed_load", INTERACTIVE_HIGH_L_GO_HISPEED_LOAD);
+                set(cpuInteractivePaths.at(0) + "/target_loads", INTERACTIVE_HIGH_L_TARGET_LOADS);
+                set(cpuInteractivePaths.at(0) + "/above_hispeed_delay", INTERACTIVE_HIGH_L_ABOVE_HISPEED_DELAY);
+                set(cpuInteractivePaths.at(1) + "/hispeed_freq", INTERACTIVE_HIGH_B_HISPEED_FREQ);
+                set(cpuInteractivePaths.at(1) + "/go_hispeed_load", INTERACTIVE_HIGH_B_GO_HISPEED_LOAD);
+                set(cpuInteractivePaths.at(1) + "/target_loads", INTERACTIVE_HIGH_B_TARGET_LOADS);
+                set(cpuInteractivePaths.at(1) + "/above_hispeed_delay", INTERACTIVE_HIGH_B_ABOVE_HISPEED_DELAY);
             break;
         default:
             break;
     }
+
+    current_profile = profile;
 }
 
 void Power::sendBoostpulse() {

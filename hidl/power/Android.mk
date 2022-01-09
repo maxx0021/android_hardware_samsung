@@ -30,9 +30,9 @@ LOCAL_SHARED_LIBRARIES := \
     libbase \
     libbinder \
     libhidlbase \
+    libhidltransport \
     libutils \
-    android.hardware.power@1.0 \
-    vendor.lineage.power@1.0
+    android.hardware.power@1.0
 
 LOCAL_STATIC_LIBRARIES := libc++fs
 
