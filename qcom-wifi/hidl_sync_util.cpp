@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 The LineageOS Project
+ * Copyright (C) 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,26 @@
  * limitations under the License.
  */
 
-#ifndef SAMSUNG_FASTCHARGE_H
-#define SAMSUNG_FASTCHARGE_H
+#include "hidl_sync_util.h"
 
-#define FASTCHARGE_DEFAULT_SETTING true
-#define FASTCHARGE_PATH "/sys/class/sec/switch/afc_disable"
+namespace {
+std::recursive_mutex g_mutex;
+}  // namespace
 
-#endif // SAMSUNG_FASTCHARGE_H
+namespace android {
+namespace hardware {
+namespace wifi {
+namespace V1_3 {
+namespace implementation {
+namespace hidl_sync_util {
+
+std::unique_lock<std::recursive_mutex> acquireGlobalLock() {
+    return std::unique_lock<std::recursive_mutex>{g_mutex};
+}
+
+}  // namespace hidl_sync_util
+}  // namespace implementation
+}  // namespace V1_3
+}  // namespace wifi
+}  // namespace hardware
+}  // namespace android

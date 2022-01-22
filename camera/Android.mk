@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020-2021 The LineageOS Project
+# Copyright (C) 2019 The LineageOS Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,31 +14,24 @@
 # limitations under the License.
 #
 
-LOCAL_PATH := $(call my-dir)
+ifeq ($(TARGET_CAMERA_VARIANT),samsung)
 
+LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
-    FastCharge.cpp \
-    service.cpp
-
-LOCAL_C_INCLUDES := \
-    $(LOCAL_PATH)/include \
+    CameraWrapper.cpp
 
 LOCAL_SHARED_LIBRARIES := \
-    libbase \
-    libbinder \
-    libcutils \
-    libhidlbase \
-    libutils \
-    vendor.lineage.fastcharge@1.0
+    libhardware liblog libutils
 
-LOCAL_MODULE := vendor.lineage.fastcharge@1.0-service.samsung
-LOCAL_INIT_RC := vendor.lineage.fastcharge@1.0-service.samsung.rc
+LOCAL_C_INCLUDES += \
+    system/media/camera/include
+
 LOCAL_MODULE_RELATIVE_PATH := hw
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_OWNER := samsung
-LOCAL_VINTF_FRAGMENTS := vendor.lineage.fastcharge@1.0-service.samsung.xml
+LOCAL_MODULE := camera.$(TARGET_BOARD_PLATFORM)
 LOCAL_VENDOR_MODULE := true
 
-include $(BUILD_EXECUTABLE)
+include $(BUILD_SHARED_LIBRARY)
+
+endif # TARGET_CAMERA_VARIANT

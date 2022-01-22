@@ -33,7 +33,6 @@ LOCAL_SHARED_LIBRARIES := \
 	libcutils \
 	libaudioutils \
 	libhardware \
-	libprocessgroup \
 	libtinyalsa \
 	libtinycompress \
 	libaudioroute \
@@ -55,7 +54,7 @@ LOCAL_CFLAGS := -Werror -Wall
 LOCAL_CFLAGS += -DPREPROCESSING_ENABLED
 
 LOCAL_MODULE := audio.primary.$(TARGET_BOOTLOADER_BOARD_NAME)
-
+LOCAL_VENDOR_MODULE := true
 LOCAL_MODULE_RELATIVE_PATH := hw
 
 LOCAL_MODULE_TAGS := optional

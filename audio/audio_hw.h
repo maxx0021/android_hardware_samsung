@@ -20,6 +20,7 @@
 #define SAMSUNG_AUDIO_HW_H
 
 #include <cutils/list.h>
+
 #include <hardware/audio.h>
 #include <hardware/audio_amplifier.h>
 
